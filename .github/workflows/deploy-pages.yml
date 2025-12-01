@@ -1,0 +1,83 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect Node.js project
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "node_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "node_build=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f package-lock.json ]; then
+            echo "use_npm_ci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_npm_ci=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.detect.outputs.node_build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.detect.outputs.node_build == 'true'
+        run: |
+          if [ "${{ steps.detect.outputs.use_npm_ci }}" = "true" ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build site
+        if: steps.detect.outputs.node_build == 'true'
+        run: npm run build --if-present
+
+      - name: Determine site directory
+        id: site
+        run: |
+          if [ -d "dist" ]; then
+            echo "path=dist" >> "$GITHUB_OUTPUT"
+          elif [ -d "build" ]; then
+            echo "path=build" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.site.outputs.path }}
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
